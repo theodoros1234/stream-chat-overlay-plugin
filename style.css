@@ -17,6 +17,8 @@ html {
   padding: calc(5px * var(--ui-scale)) calc(10px * var(--ui-scale));
   display: flex;
   flex-direction: column-reverse;
+  mask-image: linear-gradient(to bottom, #0000, #FFFF 15%);
+  -webkit-mask-image: -webkit-linear-gradient(to bottom, #0000, #FFFF 20%);
 }
 
 .chat-item {
