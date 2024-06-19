@@ -19,15 +19,17 @@ html {
   flex-direction: column-reverse;
   mask-image: linear-gradient(to bottom, #0000, #FFFF 15%);
   -webkit-mask-image: -webkit-linear-gradient(to bottom, #0000, #FFFF 15%);
+  overflow-y: clip;
 }
 
-.chat-item {
+.message {
   background-color: rgba(32, 32, 32, 0.50);
   padding: calc(10px * var(--ui-scale));
   border-radius: calc(16px * var(--ui-scale));
   margin: calc(5px * var(--ui-scale)) 0px;
   font-size: calc(17px * var(--ui-scale));
   line-height: calc(28px * var(--ui-scale));
+  overflow-y: clip;
 }
 
 .chatter-name {
@@ -46,4 +48,32 @@ html {
   margin: 0px calc(2px * var(--ui-scale));
   width: calc(28px * var(--ui-scale));
   height: calc(28px * var(--ui-scale));
+}
+
+.message-remove {
+  animation: 1s ease-in message-remove;
+  opacity: 0%;
+}
+
+.message-add {
+  animation: 0.3s ease message-add;
+}
+
+@keyframes message-remove {
+  from {
+    opacity: 100%;
+  }
+  to {
+    opacity: 0%;
+  }
+}
+
+@keyframes message-add {
+  from {
+    margin-bottom: calc(5px * var(--ui-scale) - var(--message-height));
+    opacity: 0%;
+  }
+  to {
+    opacity: 100%;
+  }
 }
