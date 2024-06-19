@@ -50,6 +50,16 @@ html {
   height: calc(28px * var(--ui-scale));
 }
 
+.replying-to {
+  font-size: calc(13px * var(--ui-scale));
+  color: #AAA;
+  line-height: initial;
+  white-space: nowrap;
+  overflow-x: clip;
+  mask-image: linear-gradient(to right, #FFFF 80%, #0000);
+  -webkit-mask-image: -webkit-linear-gradient(to right, #FFFF 80%, #0000);
+}
+
 .message-remove {
   animation: 1s ease-in message-remove;
   opacity: 0%;
