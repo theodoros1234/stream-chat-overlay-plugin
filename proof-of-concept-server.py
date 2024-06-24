@@ -1,5 +1,5 @@
 #!/bin/python3
-import os, mimetypes, time, json, socket, sys, ssl
+import os, mimetypes, time, json, socket, sys, ssl, random
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from threading import Thread, Condition
 from queue import Queue
@@ -447,6 +447,8 @@ def hexToANSIColorWrap(hex_color, text):
 # Twitch IRC message source
 def twitchIRCMessageSource():
   global IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, TOKEN, chat_queue
+  # Set and keep track of colors for chatters that didn't set theirs
+  uncolored_chatters = dict()
   # Create SSL/TLS context
   ssl_context = ssl.create_default_context()
   # Connect to server
@@ -488,6 +490,22 @@ def twitchIRCMessageSource():
               sock_wrapper.sendPrepare(f"PONG :{message.params}")
             elif cmd == "PRIVMSG":
               # Message was sent in chat
+              # Give color to chatters that didn't set theirs
+              if not 'color' in message.tags or message.tags['color'] == "":
+                # Only generate color if we haven't already from previous messages
+                if not message.username in uncolored_chatters:
+                  # Keep generating colors, until we get one that's bright enough
+                  readability = 0
+                  while readability < 255:
+                    r = random.randrange(256)
+                    g = random.randrange(256)
+                    b = random.randrange(256)
+                    readability = r*1.33 + g*2 + b
+                  # Remember this color for later
+                  uncolored_chatters[message.username] = "#%02X%02X%02X" % (r, g, b)
+                # Get saved color
+                message.tags['color'] = uncolored_chatters[message.username]
+              # Print message to console
               print(f"{hexToANSIColorWrap(message.tags['color'], message.tags['display-name'])}: {message.params}")
               # Send to local message queue
               for_local_chat_queue.append({
