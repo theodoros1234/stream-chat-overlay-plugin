@@ -108,7 +108,10 @@ class ChatQueue():
           self.queue.remove(self.queue[0])
           self.oldest_message_id += 1
         # Add message to queue
-        self.queue.append({"user": "theodoros_1234_", "user_color": "#FF0000", "message": str(msg), "timestamp": int(time.time()), "mid": self.message_id})
+        msg_for_queue = msg.copy()
+        msg_for_queue["timestamp"] = int(time.time())
+        msg_for_queue["mid"] = self.message_id
+        self.queue.append(msg_for_queue)
         self.message_id += 1
         # Mark that at least one new message was added
         messages_added = True
@@ -247,7 +250,147 @@ class Response(BaseHTTPRequestHandler):
         self.wfile.write(b"404 Not Found")
 
     except BrokenPipeError:
-      print("Connection closed by client", self.client_address)
+      print("[Local HTTP] Connection closed by client", self.client_address)
+
+
+class parsedIRCMessage():
+  def __init__(self, raw_message):
+    # Check for correct type
+    if type(raw_message) != str:
+      raise TypeError("Message must be a string")
+
+    tags_segment = None
+    prefix_segment = None
+    command_segment = None
+    params_segment = None
+    start = 0
+    end = 0
+
+    self.tags = None
+    self.nickname = None
+    self.username = None
+    self.server = None
+    self.command = []
+    self.params = None
+
+    # Get tags, if any
+    if raw_message[start] == '@':
+      end = raw_message.find(' ', start)
+      if end == -1:
+        raise ValueError("Invalid IRC command syntax: End of tags section is missing")
+      tags_segment = raw_message[start+1:end]
+      start = end + 1
+
+      # Parse tags
+      self.tags = {}
+      for tag in tags_segment.split(';'):
+        separator = tag.find('=')
+        if separator == -1:
+          # Key with no value
+          self.tags[tag] = None
+        else:
+          # Key with value
+          key = tag[:separator]
+          value = tag[separator+1:]
+          self.tags[key] = value
+
+    # Get prefix, if defined
+    if raw_message[start] == ':':
+      end = raw_message.find(' ', start)
+      if end == -1:
+        raise ValueError("Invalid IRC command syntax: End of prefix section is missing")
+      prefix_segment = raw_message[start+1:end]
+      start = end + 1
+
+      # Parse prefix
+      user_start = prefix_segment.find('!')
+      host_start = prefix_segment.find('@')
+      if user_start == host_start == -1:
+        self.server = prefix_segment
+      else:
+        if user_start == -1:    # username not defined, so host is defined
+          self.nickname = prefix_segment[:host_start]
+          self.server = prefix_segment[host_start+1:]
+        else:                   # username defined
+          self.nickname = prefix_segment[:user_start]
+          if host_start == -1:  # but host not defined
+            self.username = prefix_segment[user_start+1:]
+          else:                 # all 3 defined
+            self.username = prefix_segment[user_start+1:host_start]
+            self.server = prefix_segment[host_start+1:]
+
+    # Get command, channel and acknowledgement
+    # There are either parameters or the end of line after the command segment
+    end = raw_message.find(':', start)
+    if end == -1:
+      end = raw_message.find('\r\n', start)
+    if end == -1:
+      raise ValueError("Invalid IRC command syntax: End of message not found")
+    command_segment = raw_message[start:end-1]
+    start = end
+    self.command = command_segment.split(' ')
+
+    # Get parameters, if any
+    if raw_message[start] == ':':
+      end = raw_message.find('\r\n', start)
+      if end == -1:
+        raise ValueError("Invalid IRC command syntax: End of message not found")
+      params_segment = raw_message[start+1:end]
+      self.params = params_segment
+
+
+  def __str__(self):
+    d = {
+      "tags": self.tags,
+      "nickname": self.nickname,
+      "username": self.username,
+      "server": self.server,
+      "command": self.command,
+      "params": self.params
+    }
+    return str(d)
+
+
+# Socket IO wrapper that handles sending and receiving messages from server
+class SocketIOWrapper():
+  def __init__(self, sock):
+    self._sock = sock
+    self._receive_buffer = b""
+    self._send_buffer = b""
+    self.incoming_message_queue = Queue()
+    self.connection_open = True
+
+  # Receive new data from socket
+  def receive(self):
+    # Grab new data from socket
+    if self.connection_open:
+      chunk = self._sock.recv(4096)
+      # Check if connection closed
+      if len(chunk) == 0:
+        print("[Twitch IRC] Connection closed by server")
+        self.connection_open = False
+      # Push to buffer, and check if any full messages were received
+      self._receive_buffer += chunk
+      eol = self._receive_buffer.find(b'\r\n')
+      while eol != -1:
+        self.incoming_message_queue.put(self._receive_buffer[:eol+2].decode('utf-8'))
+        self._receive_buffer = self._receive_buffer[eol+2:]
+        eol = self._receive_buffer.find(b'\r\n')
+
+  # Put message to send buffer, so it can be sent later
+  def sendPrepare(self, message):
+    self._send_buffer += (message + "\r\n").encode('utf-8')
+
+  # Send buffered messages to server, making sure everything was sent
+  def sendFlush(self):
+    while self.connection_open and len(self._send_buffer) > 0:
+      bytes_sent = self._sock.send(self._send_buffer)
+      # Check if conneciton is closed
+      if bytes_sent == 0:
+        print("[Twitch IRC] Connection closed by server")
+        self.connection_open = False
+      # Remove part that was sent from buffer
+      self._send_buffer = self._send_buffer[bytes_sent:]
 
 
 # HTTP server thread
@@ -256,14 +399,14 @@ def HTTPServerThread():
   try:
     with ThreadingHTTPServer(('127.0.0.1', LOCAL_PORT), Response) as server:
       http_server = server
-      print("Listening at", LOCAL_PORT)
+      print("[Local HTTP] Listening at", LOCAL_PORT)
       server.serve_forever()
   except Exception as e:
-    print("HTTP server error:", e)
+    print("[Local HTTP] Exception:", e)
     exit(1)
 
 
-# Debug message source, which gets messages from terminal instead from Twitch
+# Debug message source, which gets messages from terminal instead of Twitch
 def consoleMessageSource():
   global chat_queue
   try:
@@ -274,12 +417,117 @@ def consoleMessageSource():
       elif message[:7] == "getpos ":
         print(chat_queue.posOfMID(int(message[7:])))
       else:
-        chat_queue.addMessages(message.split(','))
+        chat_queue.addMessages({
+          "user": "theodoros_1234_",
+          "user_color": "#FF0000",
+          "message": message
+        })
   except KeyboardInterrupt:
     pass
   except EOFError:
     pass
 
+
+# Converts hexadecimal color to corresponding terminal ANSI escape code
+def hexToANSIColorWrap(hex_color, text):
+  # Return uncolored string on wrong type or size
+  if type(hex_color) != str or len(hex_color) != 7 or hex_color[0] != "#":
+    return text
+  # Try to get RGB values, or return uncolored string on value error
+  try:
+    r = int(hex_color[1:3], base=16)
+    g = int(hex_color[3:5], base=16)
+    b = int(hex_color[5:7], base=16)
+  except ValueError:
+    return text
+  # Convert to ANSI escape code
+  return f"\033[38;2;{str(r)};{str(g)};{str(b)}m{text}\033[0m"
+
+
+# Twitch IRC message source
+def twitchIRCMessageSource():
+  global IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, TOKEN, chat_queue
+  # Create SSL/TLS context
+  ssl_context = ssl.create_default_context()
+  # Connect to server
+  with socket.create_connection((IRC_SERVER, IRC_PORT)) as sock:
+    # Wrap socket with SSL/TLS
+    with ssl_context.wrap_socket(sock, server_hostname=IRC_SERVER) as sock_ssl:
+      sock_wrapper = SocketIOWrapper(sock_ssl)
+      in_channel = False
+      should_disconnect = False
+      for_local_chat_queue = []
+      # Send data to server from console
+      try:
+        # Log in
+        sock_wrapper.sendPrepare(f"PASS oauth:{TOKEN}")
+        sock_wrapper.sendPrepare(f"NICK {USERNAME}")
+        sock_wrapper.sendFlush()
+
+        # Listen to server's messages
+        while (sock_wrapper.connection_open and not should_disconnect) or not sock_wrapper.incoming_message_queue.empty():
+          # Receive new messages
+          sock_wrapper.receive()
+
+          # Process any new messages
+          while not sock_wrapper.incoming_message_queue.empty():
+            message = parsedIRCMessage(sock_wrapper.incoming_message_queue.get())
+            #print(message)
+            cmd = message.command[0]
+            if cmd == "NOTICE":
+              # Authentication failed, likely
+              print("[Twitch IRC] Got notice from server:", message.params)
+              should_disconnect = True
+            elif cmd == "PART":
+              # Our account was banned
+              print("[Twitch IRC] Banned from channel")
+              should_disconnect = True
+              in_channel = False;
+            elif cmd == "PING":
+              # Keeping the connection alive
+              sock_wrapper.sendPrepare(f"PONG :{message.params}")
+            elif cmd == "PRIVMSG":
+              # Message was sent in chat
+              print(f"{hexToANSIColorWrap(message.tags['color'], message.tags['display-name'])}: {message.params}")
+              # Send to local message queue
+              for_local_chat_queue.append({
+                "user": message.tags['display-name'],
+                "user_color": message.tags['color'],
+                "message": message.params
+              })
+            elif cmd == "421":
+              # We sent a command the server doesn't understand
+              print(f"[Twitch IRC] Server didn't recognize a command: {str(message)}")
+            elif cmd == "001":
+              # Successful login
+              print("[Twitch IRC] Logged in")
+              # Ask for message tags
+              sock_wrapper.sendPrepare(f"CAP REQ twitch.tv/tags")
+            elif cmd == "CAP":
+              # Extended capabilities
+              if message.command[2] == "NAK":
+                # Close connection when denied
+                print("[Twitch IRC] Extended capabilities denied")
+                should_disconnect = True
+              elif message.command[2] == "ACK" and message.params == "twitch.tv/tags":
+                # Join channel when accepted
+                print("[Twitch IRC] Extended capabilities accepted, joining channel")
+                sock_wrapper.sendPrepare(f"JOIN #{CHANNEL}")
+                in_channel = True
+
+          # Send any queued up commands to server
+          sock_wrapper.sendFlush()
+          # Add any received messages to local message queue
+          if len(for_local_chat_queue) > 0:
+            chat_queue.addMessages(for_local_chat_queue)
+            for_local_chat_queue = []
+
+      except KeyboardInterrupt:
+        print("[Twitch IRC] Closing connection")
+      # If we're in the channel, leave it
+      if in_channel:
+        sock_wrapper.sendPrepare(f"PART #{CHANNEL}")
+        sock_wrapper.sendFlush()
 
 if __name__ == "__main__":
   # Load config
@@ -303,8 +551,8 @@ if __name__ == "__main__":
   http_server_thread = Thread(target=HTTPServerThread)
   http_server_thread.start()
 
-  consoleMessageSource()
+  twitchIRCMessageSource()
 
   # Stop
-  print("Stopping")
+  print("[Local HTTP] Stopping")
   http_server.shutdown()
