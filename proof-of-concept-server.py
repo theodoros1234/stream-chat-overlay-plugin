@@ -1,17 +1,93 @@
 #!/bin/python3
-import os, mimetypes, time, json
+import os, mimetypes, time, json, socket, sys, ssl
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from threading import Thread, Condition
+from queue import Queue
 
-PORT = 6968
-HTTP_REQUEST_TIMEOUT = 20
-QUEUE_MSG_TIMEOUT = 60
-QUEUE_MSG_COUNT_LIMIT = 500
 SESSION_ID = str(time.time_ns())
+LOCAL_PORT = None
+HTTP_REQUEST_TIMEOUT = None
+QUEUE_MSG_TIMEOUT = None
+QUEUE_MSG_COUNT_LIMIT = None
+IRC_SERVER = None
+IRC_PORT = None
+USERNAME = None
+CHANNEL = None
+TOKEN = None
 
-# Single objects placed in arrays, as a workaround to a problem with accessing the same variable from different threads
-http_server = [None]
-chat_queue = [None]
+http_server = None
+chat_queue = None
+
+
+# Load config from file
+def loadConfig(config_file_path):
+  global LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, TOKEN
+  def parseIntValue(key, val):
+    try:
+      return int(value)
+    except ValueError:
+      print(f"{key} must be an integer number.")
+      return None
+
+  try:
+    with open(config_file_path, 'r') as config_file:
+      for line in config_file.readlines():
+        # Remove newline and/or carriage return
+        line = line.removesuffix('\n').removesuffix('\r')
+        # Ignore lines that start with #
+        if len(line)>1 and line[0] == '#':
+          continue
+        # Split line to key and value
+        separator = line.find('=')
+        if separator != -1:
+          key = line[:separator]
+          value = line[separator+1:]
+          # Determine if it's a value we want, and grab it
+          if key == "irc-server":
+            IRC_SERVER = value
+          elif key == "irc-port":
+            IRC_PORT = parseIntValue(key, value)
+            if IRC_PORT == None:
+              return False
+          elif key == "username":
+            USERNAME = value
+          elif key == "channel":
+            CHANNEL = value
+          elif key == "token":
+            TOKEN = value
+          elif key == "local-port":
+            LOCAL_PORT = parseIntValue(key, value)
+            if LOCAL_PORT == None:
+              return False
+          elif key == "http-request-timeout":
+            HTTP_REQUEST_TIMEOUT = parseIntValue(key, value)
+            if HTTP_REQUEST_TIMEOUT == None:
+              return False
+          elif key == "queue-msg-timeout":
+            QUEUE_MSG_TIMEOUT = parseIntValue(key, value)
+            if QUEUE_MSG_TIMEOUT == None:
+              return False
+          elif key == "queue-msg-count-limit":
+            QUEUE_MSG_COUNT_LIMIT = parseIntValue(key, value)
+            if QUEUE_MSG_COUNT_LIMIT == None:
+              return False
+          else:
+            print(f"Unknown option '{key}' found in config file '{config_file_path}'.")
+  # Handle common file errors
+  except FileNotFoundError:
+    print(f"Could not find config file '{config_file_path}'.")
+    return False
+  except PermissionError:
+    print(f"Permission denied for config file '{config_file_path}'.")
+    return False
+  # Make sure we got all the requred parameters
+  for param in [LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, TOKEN]:
+    if param == None:
+      print(f"Config file '{config_file_path}' is missing some options.")
+      print("Required options are: local-port, http-request-timeout, queue-msg-timeout, queue-msg-count-limit, irc-server, irc-port, username, channel, token")
+      return False
+  return True
+
 
 # Chat queue
 class ChatQueue():
@@ -105,13 +181,14 @@ class ChatQueue():
 # HTTP request handler
 class Response(BaseHTTPRequestHandler):
   def do_GET(self):
+    global chat_queue
     try:
       # Request is for one of the code files
       if self.path == "/script.js" or self.path == "/ui.html" or self.path == "/style.css":
         # Make sure the file exists
         if os.path.exists(self.path[1:]):
           self.send_response(200)                                                         # Response: 200 OK
-          self.send_header("Access-Control-Allow-Origin", "http://localhost:"+str(PORT))  # Deny other sites from snooping on our code
+          self.send_header("Access-Control-Allow-Origin", "http://localhost:"+str(LOCAL_PORT))  # Deny other sites from snooping on our code
           self.send_header("Content-Type", mimetypes.guess_type(self.path)[0])            # Figure out what file type we're sending
           self.end_headers()
 
@@ -146,9 +223,9 @@ class Response(BaseHTTPRequestHandler):
               pass
 
         if request_sid == SESSION_ID:
-          new_messages = chat_queue[0].getNewMessages(message_id=request_mid, timeout=HTTP_REQUEST_TIMEOUT)
+          new_messages = chat_queue.getNewMessages(message_id=request_mid, timeout=HTTP_REQUEST_TIMEOUT)
         else:
-          new_messages = chat_queue[0].getNewMessages(timeout=HTTP_REQUEST_TIMEOUT)
+          new_messages = chat_queue.getNewMessages(timeout=HTTP_REQUEST_TIMEOUT)
 
         response = {
           "sid": SESSION_ID,
@@ -156,7 +233,7 @@ class Response(BaseHTTPRequestHandler):
         }
 
         self.send_response(200)                                                         # Response: 200 OK
-        self.send_header("Access-Control-Allow-Origin", "http://localhost:"+str(PORT))  # Deny other sites from snooping on our code
+        self.send_header("Access-Control-Allow-Origin", "http://localhost:"+str(LOCAL_PORT))  # Deny other sites from snooping on our code
         self.send_header("Content-Type", "application/json")                            # Responding in JSON
         self.end_headers()
 
@@ -175,38 +252,59 @@ class Response(BaseHTTPRequestHandler):
 
 # HTTP server thread
 def HTTPServerThread():
+  global http_server
   try:
-    with ThreadingHTTPServer(('127.0.0.1', PORT), Response) as server:
-      http_server[0] = server
-      print("Listening at", PORT)
+    with ThreadingHTTPServer(('127.0.0.1', LOCAL_PORT), Response) as server:
+      http_server = server
+      print("Listening at", LOCAL_PORT)
       server.serve_forever()
   except Exception as e:
     print("HTTP server error:", e)
     exit(1)
 
 
-if __name__ == "__main__":
-  # Create chat queue
-  chat_queue[0] = ChatQueue()
-
-  # Start HTTP server
-  http_server_thread = Thread(target=HTTPServerThread)
-  http_server_thread.start()
-
+# Debug message source, which gets messages from terminal instead from Twitch
+def consoleMessageSource():
+  global chat_queue
   try:
     while True:
       message = input("Enter chat message: ")
       if message == "debug":
-        chat_queue[0].debugQueue()
+        chat_queue.debugQueue()
       elif message[:7] == "getpos ":
-        print(chat_queue[0].posOfMID(int(message[7:])))
+        print(chat_queue.posOfMID(int(message[7:])))
       else:
-        chat_queue[0].addMessages(message.split(','))
+        chat_queue.addMessages(message.split(','))
   except KeyboardInterrupt:
     pass
   except EOFError:
     pass
 
+
+if __name__ == "__main__":
+  # Load config
+  if not loadConfig("server.config"):
+    # Exit on invalid config
+    exit(1)
+  # Print config to console
+  print("Session ID:", SESSION_ID)
+  print("Local port:", LOCAL_PORT)
+  print("HTTP request timeout:", HTTP_REQUEST_TIMEOUT)
+  print("Queue message timeout:", QUEUE_MSG_TIMEOUT)
+  print("Queue message count limit:", QUEUE_MSG_COUNT_LIMIT)
+  print("IRC Server:", IRC_SERVER)
+  print("IRC Port:", IRC_PORT)
+  print("Username:", USERNAME)
+  print("Token:", len(TOKEN)*'*')   # Censor token for security
+
+  # Create chat queue
+  chat_queue = ChatQueue()
+  # Start HTTP server
+  http_server_thread = Thread(target=HTTPServerThread)
+  http_server_thread.start()
+
+  consoleMessageSource()
+
   # Stop
   print("Stopping")
-  http_server[0].shutdown()
+  http_server.shutdown()
