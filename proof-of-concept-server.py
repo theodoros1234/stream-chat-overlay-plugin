@@ -514,14 +514,17 @@ def twitchIRCMessageSource():
                   uncolored_chatters[message.username] = "#%02X%02X%02X" % (r, g, b)
                 # Get saved color
                 message.tags['color'] = uncolored_chatters[message.username]
+              # Use username as display name when the user didn't set theirs
+              if not 'display-name' in message.tags or message.tags['display-name'] == "":
+                message.tags['display-name'] = message.username
               # Print message to console
-              print(message)
               print(f"{hexToANSIColorWrap(message.tags['color'], message.tags['display-name'])}: {message.params}")
               # Get needed info from this message
               needed_msg_info = {
                 'user': message.tags['display-name'],
                 'user_color': message.tags['color']
               }
+              # Handle replies
               if 'reply-parent-display-name' in message.tags and 'reply-parent-msg-body' in message.tags:
                 # Message is a reply
                 needed_msg_info['replying_to_user'] = message.tags['reply-parent-display-name']
