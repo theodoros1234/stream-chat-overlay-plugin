@@ -13,7 +13,8 @@ IRC_SERVER = None
 IRC_PORT = None
 USERNAME = None
 CHANNEL = None
-TOKEN = None
+OAUTH_CLIENT_ID = None
+OAUTH_TOKEN = None
 
 http_server = None
 chat_queue = None
@@ -21,7 +22,7 @@ chat_queue = None
 
 # Load config from file
 def loadConfig(config_file_path):
-  global LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, TOKEN
+  global LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, OAUTH_CLIENT_ID, OAUTH_TOKEN
   def parseIntValue(key, val):
     try:
       return int(value)
@@ -53,8 +54,10 @@ def loadConfig(config_file_path):
             USERNAME = value
           elif key == "channel":
             CHANNEL = value
-          elif key == "token":
-            TOKEN = value
+          elif key == "oauth-client-id":
+            OAUTH_CLIENT_ID = value
+          elif key == "oauth-token":
+            OAUTH_TOKEN = value
           elif key == "local-port":
             LOCAL_PORT = parseIntValue(key, value)
             if LOCAL_PORT == None:
@@ -81,10 +84,10 @@ def loadConfig(config_file_path):
     print(f"Permission denied for config file '{config_file_path}'.")
     return False
   # Make sure we got all the requred parameters
-  for param in [LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, TOKEN]:
+  for param in [LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, OAUTH_CLIENT_ID, OAUTH_TOKEN]:
     if param == None:
       print(f"Config file '{config_file_path}' is missing some options.")
-      print("Required options are: local-port, http-request-timeout, queue-msg-timeout, queue-msg-count-limit, irc-server, irc-port, username, channel, token")
+      print("Required options are: local-port, http-request-timeout, queue-msg-timeout, queue-msg-count-limit, irc-server, irc-port, username, channel, oauth-client-id, oauth-token")
       return False
   return True
 
@@ -292,6 +295,12 @@ class parsedIRCMessage():
           # Key with value
           key = tag[:separator]
           value = tag[separator+1:]
+          # Convert escape codes
+          value = value.replace('\\:', ';')\
+                       .replace('\\s', ' ')\
+                       .replace('\\\\', '\\')\
+                       .replace('\\r', '\r')\
+                       .replace('\\n', '\n')
           self.tags[key] = value
 
     # Get prefix, if defined
@@ -446,7 +455,7 @@ def hexToANSIColorWrap(hex_color, text):
 
 # Twitch IRC message source
 def twitchIRCMessageSource():
-  global IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, TOKEN, chat_queue
+  global IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, OAUTH_TOKEN, chat_queue
   # Set and keep track of colors for chatters that didn't set theirs
   uncolored_chatters = dict()
   # Create SSL/TLS context
@@ -462,7 +471,7 @@ def twitchIRCMessageSource():
       # Send data to server from console
       try:
         # Log in
-        sock_wrapper.sendPrepare(f"PASS oauth:{TOKEN}")
+        sock_wrapper.sendPrepare(f"PASS oauth:{OAUTH_TOKEN}")
         sock_wrapper.sendPrepare(f"NICK {USERNAME}")
         sock_wrapper.sendFlush()
 
@@ -506,13 +515,24 @@ def twitchIRCMessageSource():
                 # Get saved color
                 message.tags['color'] = uncolored_chatters[message.username]
               # Print message to console
+              print(message)
               print(f"{hexToANSIColorWrap(message.tags['color'], message.tags['display-name'])}: {message.params}")
-              # Send to local message queue
-              for_local_chat_queue.append({
-                "user": message.tags['display-name'],
-                "user_color": message.tags['color'],
-                "message": message.params
-              })
+              # Get needed info from this message
+              needed_msg_info = {
+                'user': message.tags['display-name'],
+                'user_color': message.tags['color']
+              }
+              if 'reply-parent-display-name' in message.tags and 'reply-parent-msg-body' in message.tags:
+                # Message is a reply
+                needed_msg_info['replying_to_user'] = message.tags['reply-parent-display-name']
+                needed_msg_info['replying_to_message'] = message.tags['reply-parent-msg-body']
+                # Cut out @user-being-replied-to from message
+                needed_msg_info['message'] = message.params[message.params.find(' ')+1:]
+              else:
+                # Normal message (not reply)
+                needed_msg_info['message'] = message.params
+              # Append message to local chat queue
+              for_local_chat_queue.append(needed_msg_info)
             elif cmd == "421":
               # We sent a command the server doesn't understand
               print(f"[Twitch IRC] Server didn't recognize a command: {str(message)}")
@@ -561,7 +581,8 @@ if __name__ == "__main__":
   print("IRC Server:", IRC_SERVER)
   print("IRC Port:", IRC_PORT)
   print("Username:", USERNAME)
-  print("Token:", len(TOKEN)*'*')   # Censor token for security
+  print("OAuth Client ID:", OAUTH_CLIENT_ID)
+  print("OAuth Token:", len(OAUTH_TOKEN)*'*')   # Censor token for security
 
   # Create chat queue
   chat_queue = ChatQueue()

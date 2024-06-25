@@ -64,6 +64,13 @@ function parseNewMessages() {
       // Main div
       let msg_main = document.createElement("div");
       msg_main.classList.add("message");
+      // Replying to another message
+      if (msg.replying_to_user != undefined && msg.replying_to_message != undefined) {
+        let msg_replying_to = document.createElement("div");
+        msg_replying_to.classList.add("replying-to");
+        msg_replying_to.textContent = "Replying to @" + msg.replying_to_user + ": " + msg.replying_to_message;
+        msg_main.appendChild(msg_replying_to)
+      }
       // Chatter name
       let msg_user = document.createElement("span");
       msg_user.classList.add("chatter-name");
