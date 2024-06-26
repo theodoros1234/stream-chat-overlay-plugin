@@ -18,7 +18,7 @@ body {
   display: flex;
   flex-direction: column-reverse;
   mask-image: linear-gradient(to bottom, #0000, #FFFF 15%);
-  -webkit-mask-image: -webkit-linear-gradient(to bottom, #0000, #FFFF 15%);
+  -webkit-mask-image: linear-gradient(to bottom, #0000, #FFFF 15%);
   overflow-y: clip;
 }
 
@@ -30,6 +30,7 @@ body {
   font-size: calc(17px * var(--ui-scale));
   line-height: calc(28px * var(--ui-scale));
   overflow-y: clip;
+  flex: none;
 }
 
 .chatter-name {

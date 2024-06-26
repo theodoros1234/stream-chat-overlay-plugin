@@ -2,7 +2,11 @@ const MESSAGE_TIMEOUT = 10000;
 const MESSAGE_REMOVE_ANIMATION_DURATION = 1000;
 const MESSAGE_COUNT_MAX = 35;
 
-// DOM Elements
+var img_scale = 1;
+var ui_scale = 1;
+
+// DOM
+const css_root = document.querySelector(":root");
 var chat_container;
 
 // Server communication
@@ -20,10 +24,41 @@ server.timeout = 30000;
 var session_id = null;
 var last_message_id = null;
 
+// Handle window resizing
+function resize() {
+  // Change image scaling if needed
+  var new_img_scale = Math.ceil(ui_scale * window.devicePixelRatio);
+  if (new_img_scale != img_scale) {
+    img_scale = new_img_scale;
+    console.log("Changed image scale to " + img_scale);
+    for (let img of document.getElementsByTagName('img'))
+      pickImageScale(img);
+  }
+}
+
+// URL parameters changed
+function urlParamsChange() {
+  for (const [key, value] of new URLSearchParams(window.location.hash.substring(1))) {
+    if (key == "scale") {
+      new_ui_scale = parseFloat(value);
+      if (new_ui_scale != ui_scale) {
+        ui_scale = new_ui_scale;
+        css_root.style.setProperty('--ui-scale', ui_scale);
+        resize();
+      }
+    }
+  }
+}
+
 // Initialize when the page fully loads
 function init() {
   // Get needed DOM elements
   chat_container = document.getElementById("chat-container");
+  // Add event handlers
+  window.addEventListener("resize", resize);
+  window.addEventListener("hashchange", urlParamsChange);
+  resize();
+  urlParamsChange();
   // Start requesting messages from server
   getNewMessages();
 }
@@ -36,6 +71,28 @@ function getNewMessages() {
   else
     server.open("GET", "get-messages");
   server.send();
+}
+
+// Changes image to appropriate scale
+function pickImageScale(img) {
+  // Try to pick the wanted scale
+  if (img.scales[img_scale] !== undefined) {
+    img.src = img.scales[img_scale];
+  } else {
+    // Otherwise, try to pick another scale
+    best_scale = null;
+    for (let i of [4, 2, 1]) {
+      if (img.scales[i] !== undefined) {
+        // If we haven't found anything yet, pick anything we can get
+        if (best_scale === null)
+          best_scale = img.scales[i];
+        // Otherwise, we're more picky and only pick big enough scales
+        else if (i >= img_scale)
+          best_scale = img.scales[i];
+      }
+    }
+    img.src = best_scale;
+  }
 }
 
 // Parses and displays new messages received from server
@@ -51,7 +108,7 @@ function parseNewMessages() {
     // Go through messages
     for (let msg of data.messages) {
       // Print message to console
-      console.log(msg);
+      // console.log(msg);
 
       // Remove oldest messages if we've reached max message limit
       while (chat_container.children.length >= MESSAGE_COUNT_MAX) {
@@ -65,11 +122,19 @@ function parseNewMessages() {
       let msg_main = document.createElement("div");
       msg_main.classList.add("message");
       // Replying to another message
-      if (msg.replying_to_user != undefined && msg.replying_to_message != undefined) {
+      if (msg.replying_to_user != undefined && msg.replying_to_message !== undefined) {
         let msg_replying_to = document.createElement("div");
         msg_replying_to.classList.add("replying-to");
         msg_replying_to.textContent = "Replying to @" + msg.replying_to_user + ": " + msg.replying_to_message;
         msg_main.appendChild(msg_replying_to)
+      }
+      // Badges
+      for (let badge of msg['badges']) {
+        let msg_badge = new Image();
+        msg_badge.classList.add('badge');
+        msg_badge.scales = badge;
+        pickImageScale(msg_badge);
+        msg_main.appendChild(msg_badge);
       }
       // Chatter name
       let msg_user = document.createElement("span");

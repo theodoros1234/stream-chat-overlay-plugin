@@ -1,5 +1,5 @@
 #!/bin/python3
-import os, mimetypes, time, json, socket, sys, ssl, random
+import os, mimetypes, time, json, socket, sys, ssl, random, requests
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from threading import Thread, Condition
 from queue import Queue
@@ -11,18 +11,20 @@ QUEUE_MSG_TIMEOUT = None
 QUEUE_MSG_COUNT_LIMIT = None
 IRC_SERVER = None
 IRC_PORT = None
-USERNAME = None
 CHANNEL = None
-OAUTH_CLIENT_ID = None
 OAUTH_TOKEN = None
 
 http_server = None
 chat_queue = None
+oauth_client_id = None
+user_id = None
+username = None
+channel_id = None
 
 
 # Load config from file
 def loadConfig(config_file_path):
-  global LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, OAUTH_CLIENT_ID, OAUTH_TOKEN
+  global LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, CHANNEL, OAUTH_TOKEN
   def parseIntValue(key, val):
     try:
       return int(value)
@@ -50,12 +52,8 @@ def loadConfig(config_file_path):
             IRC_PORT = parseIntValue(key, value)
             if IRC_PORT == None:
               return False
-          elif key == "username":
-            USERNAME = value
           elif key == "channel":
             CHANNEL = value
-          elif key == "oauth-client-id":
-            OAUTH_CLIENT_ID = value
           elif key == "oauth-token":
             OAUTH_TOKEN = value
           elif key == "local-port":
@@ -84,10 +82,10 @@ def loadConfig(config_file_path):
     print(f"Permission denied for config file '{config_file_path}'.")
     return False
   # Make sure we got all the requred parameters
-  for param in [LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, OAUTH_CLIENT_ID, OAUTH_TOKEN]:
+  for param in [LOCAL_PORT, HTTP_REQUEST_TIMEOUT, QUEUE_MSG_TIMEOUT, QUEUE_MSG_COUNT_LIMIT, IRC_SERVER, IRC_PORT, CHANNEL, OAUTH_TOKEN]:
     if param == None:
       print(f"Config file '{config_file_path}' is missing some options.")
-      print("Required options are: local-port, http-request-timeout, queue-msg-timeout, queue-msg-count-limit, irc-server, irc-port, username, channel, oauth-client-id, oauth-token")
+      print("Required options are: local-port, http-request-timeout, queue-msg-timeout, queue-msg-count-limit, irc-server, irc-port, channel, oauth-token")
       return False
   return True
 
@@ -453,11 +451,105 @@ def hexToANSIColorWrap(hex_color, text):
   return f"\033[38;2;{str(r)};{str(g)};{str(b)}m{text}\033[0m"
 
 
+# Checks if Twitch OAuth token is valid and gets required info about it
+# Returns True/False based on validity of token and required scopes
+def twitchValidateToken():
+  global OAUTH_TOKEN, oauth_client_id, username, user_id
+  r = requests.get("https://id.twitch.tv/oauth2/validate", headers={'Authorization': f"OAuth {OAUTH_TOKEN}"})
+  # Invalid token
+  if r.status_code == 401:
+    print("[Twitch API] OAuth token is invalid")
+    return False
+  elif r.status_code != 200:
+    print(f"[Twitch API] Could not check validity of OAuth token: Server responded with {str(r.status_code)} status code")
+  # Parse JSON
+  r_values = r.json()
+  # Check for required scope
+  if not "chat:read" in r_values['scopes']:
+    print("[Twitch API] OAuth token is missing scope 'chat:read'")
+    return False
+  # Parse info
+  oauth_client_id = r_values['client_id']
+  username = r_values['login']
+  user_id = r_values['user_id']
+  return True
+
+
+def twitchGetIDOfUser(username):
+  global OAUTH_TOKEN, oauth_client_id
+  headers = {
+    "Authorization": f"Bearer {OAUTH_TOKEN}",
+    "Client-Id": oauth_client_id
+  }
+  r = requests.get("https://api.twitch.tv/helix/users", headers=headers, params={"login": username})
+  # Unauthorized or bad request
+  if r.status_code != 200:
+    print(f"[Twitch API] Could not get user ID: Server responded with {str(r.status_code)} status code")
+    return
+  # Parse info
+  r_values = r.json()
+  # No value returned
+  if len(r_values['data']) == 0:
+    print(f"[Twitch API] Could not get user ID: Server responded with no data")
+    return
+  return r_values['data'][0]['id']
+
+
+# Gets Twitch global and channel chat badges
+def twitchGetChatBadges():
+  global CHANNEL, oauth_client_id, OAUTH_TOKEN
+  # Auth headers
+  headers = {
+    'Authorization': f"Bearer {OAUTH_TOKEN}",
+    'Client-Id': oauth_client_id
+  }
+  # Get global and channel badges
+  r_global_badges = requests.get("https://api.twitch.tv/helix/chat/badges/global", headers=headers)
+  if r_global_badges.status_code != 200:
+    print(f"[Twitch API] Could not get global chat badges. Server responded with {str(r_global_badges.status_code)}")
+    return
+  r_channel_badges = requests.get("https://api.twitch.tv/helix/chat/badges", headers=headers, params={'broadcaster_id': channel_id})
+  if r_channel_badges.status_code != 200:
+    print(f"[Twitch API] Could not get channel chat badges. Server responded with {str(r_channel_badges.status_code)}")
+    return
+
+  # Parse badge info
+  badges = {}
+  for badge_info in r_global_badges.json()['data'] + r_channel_badges.json()['data']:
+    # Badge category level (e.g. subscriber, bits, etc.)
+    # Create category in local database if it doesn't exist
+    if not badge_info['set_id'] in badges:
+      badges[badge_info['set_id']] = dict()
+    # Go through all versions
+    for badge_version_info in badge_info['versions']:
+      # Badge version level (e.g. 6-month sub badge)
+      badge_version = dict()
+      # 1x, 2x and 4x scale versions of this badge version
+      badge_version[1] = badge_version_info['image_url_1x']
+      badge_version[2] = badge_version_info['image_url_2x']
+      badge_version[4] = badge_version_info['image_url_4x']
+      badges[badge_info['set_id']][badge_version_info['id']] = badge_version
+  return badges
+
+
 # Twitch IRC message source
 def twitchIRCMessageSource():
-  global IRC_SERVER, IRC_PORT, USERNAME, CHANNEL, OAUTH_TOKEN, chat_queue
+  global IRC_SERVER, IRC_PORT, username, CHANNEL, OAUTH_TOKEN, chat_queue, channel_id
   # Set and keep track of colors for chatters that didn't set theirs
   uncolored_chatters = dict()
+  # Validate Twitch OAuth token
+  if not twitchValidateToken():
+    return 2
+  print(f"[Twitch API] Logged in as {username} with UID {user_id}")
+  # Get channel ID
+  channel_id = twitchGetIDOfUser(CHANNEL)
+  if channel_id == None:
+    return 2
+  print(f"[Twitch API] Got channel ID {channel_id}")
+  # Get channel badges
+  badges = twitchGetChatBadges()
+  if badges == None:
+    return 3
   # Create SSL/TLS context
   ssl_context = ssl.create_default_context()
   # Connect to server
@@ -472,7 +564,7 @@ def twitchIRCMessageSource():
       try:
         # Log in
         sock_wrapper.sendPrepare(f"PASS oauth:{OAUTH_TOKEN}")
-        sock_wrapper.sendPrepare(f"NICK {USERNAME}")
+        sock_wrapper.sendPrepare(f"NICK {username}")
         sock_wrapper.sendFlush()
 
         # Listen to server's messages
@@ -489,14 +581,17 @@ def twitchIRCMessageSource():
               # Authentication failed, likely
               print("[Twitch IRC] Got notice from server:", message.params)
               should_disconnect = True
+
             elif cmd == "PART":
               # Our account was banned
               print("[Twitch IRC] Banned from channel")
               should_disconnect = True
               in_channel = False;
+
             elif cmd == "PING":
               # Keeping the connection alive
               sock_wrapper.sendPrepare(f"PONG :{message.params}")
+
             elif cmd == "PRIVMSG":
               # Message was sent in chat
               # Give color to chatters that didn't set theirs
@@ -522,7 +617,8 @@ def twitchIRCMessageSource():
               # Get needed info from this message
               needed_msg_info = {
                 'user': message.tags['display-name'],
-                'user_color': message.tags['color']
+                'user_color': message.tags['color'],
+                'badges': []
               }
               # Handle replies
               if 'reply-parent-display-name' in message.tags and 'reply-parent-msg-body' in message.tags:
@@ -534,16 +630,28 @@ def twitchIRCMessageSource():
               else:
                 # Normal message (not reply)
                 needed_msg_info['message'] = message.params
+              # Handle badges
+              if 'badges' in message.tags and message.tags['badges'] != "":
+                for badge in message.tags['badges'].split(','):
+                  badge_info = badge.split('/')
+                  try:
+                    needed_msg_info['badges'].append(badges[badge_info[0]][badge_info[1]])
+                  except KeyError as e:
+                    # Silently ignore unknown badges
+                    print("[Twitch IRC] Unknown badge:", badge_info[0], badge_info[1])
               # Append message to local chat queue
               for_local_chat_queue.append(needed_msg_info)
+
             elif cmd == "421":
               # We sent a command the server doesn't understand
               print(f"[Twitch IRC] Server didn't recognize a command: {str(message)}")
+
             elif cmd == "001":
               # Successful login
               print("[Twitch IRC] Logged in")
               # Ask for message tags
               sock_wrapper.sendPrepare(f"CAP REQ twitch.tv/tags")
+
             elif cmd == "CAP":
               # Extended capabilities
               if message.command[2] == "NAK":
@@ -569,6 +677,7 @@ def twitchIRCMessageSource():
       if in_channel:
         sock_wrapper.sendPrepare(f"PART #{CHANNEL}")
         sock_wrapper.sendFlush()
+  return 0
 
 if __name__ == "__main__":
   # Load config
@@ -583,18 +692,20 @@ if __name__ == "__main__":
   print("Queue message count limit:", QUEUE_MSG_COUNT_LIMIT)
   print("IRC Server:", IRC_SERVER)
   print("IRC Port:", IRC_PORT)
-  print("Username:", USERNAME)
-  print("OAuth Client ID:", OAUTH_CLIENT_ID)
   print("OAuth Token:", len(OAUTH_TOKEN)*'*')   # Censor token for security
+  print()
+
 
   # Create chat queue
   chat_queue = ChatQueue()
   # Start HTTP server
   http_server_thread = Thread(target=HTTPServerThread)
   http_server_thread.start()
-
-  twitchIRCMessageSource()
+  # Start Twitch IRC client
+  exit_code = twitchIRCMessageSource()
 
   # Stop
   print("[Local HTTP] Stopping")
   http_server.shutdown()
+  exit(exit_code)
+
