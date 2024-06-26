@@ -532,6 +532,16 @@ def twitchGetChatBadges():
   return badges
 
 
+# Gets URL of Twitch emote
+def twitchGetEmoteInfo(emote_id):
+  emote = {}
+  scales = [(1, '1.0'), (2, '2.0'), (4, '3.0')]
+  # Create URL for each emote scale from template
+  for scale in scales:
+    emote[scale[0]] = f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/default/dark/{scale[1]}"
+  return emote
+
+
 # Twitch IRC message source
 def twitchIRCMessageSource():
   global IRC_SERVER, IRC_PORT, username, CHANNEL, OAUTH_TOKEN, chat_queue, channel_id
@@ -609,6 +619,7 @@ def twitchIRCMessageSource():
                   uncolored_chatters[message.username] = "#%02X%02X%02X" % (r, g, b)
                 # Get saved color
                 message.tags['color'] = uncolored_chatters[message.username]
+
               # Use username as display name when the user didn't set theirs
               if not 'display-name' in message.tags or message.tags['display-name'] == "":
                 message.tags['display-name'] = message.username
@@ -618,8 +629,10 @@ def twitchIRCMessageSource():
               needed_msg_info = {
                 'user': message.tags['display-name'],
                 'user_color': message.tags['color'],
-                'badges': []
+                'badges': [],
+                'emotes': []
               }
+
               # Handle replies
               if 'reply-parent-display-name' in message.tags and 'reply-parent-msg-body' in message.tags:
                 # Message is a reply
@@ -630,6 +643,7 @@ def twitchIRCMessageSource():
               else:
                 # Normal message (not reply)
                 needed_msg_info['message'] = message.params
+
               # Handle badges
               if 'badges' in message.tags and message.tags['badges'] != "":
                 for badge in message.tags['badges'].split(','):
@@ -641,6 +655,26 @@ def twitchIRCMessageSource():
                     print("[Twitch IRC] Unknown badge:", badge_info[0], badge_info[1])
               # Append message to local chat queue
               for_local_chat_queue.append(needed_msg_info)
+
+              # Handle emotes
+              if 'emotes' in message.tags and message.tags['emotes'] != "":
+                # Go through all emotes in message
+                for emote_info in message.tags['emotes'].split('/'):
+                  # Parse info from single emote
+                  emote_info_split = emote_info.split(':')
+                  for emote_instance in emote_info_split[1].split(','):
+                    # Handle each instance of that emote
+                    emote_instance_split = emote_instance.split('-')
+                    emote = {}
+                    emote['start'] = int(emote_instance_split[0])
+                    emote['end'] = int(emote_instance_split[1]) + 1
+                    emote['scales'] = twitchGetEmoteInfo(emote_info_split[0])
+                    needed_msg_info['emotes'].append(emote)
+                # Sort by position in message
+                def sortHelper(item):
+                  return item['start']
+                needed_msg_info['emotes'].sort(key=sortHelper)
+
 
             elif cmd == "421":
               # We sent a command the server doesn't understand

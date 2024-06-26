@@ -129,9 +129,9 @@ function parseNewMessages() {
         msg_main.appendChild(msg_replying_to)
       }
       // Badges
-      for (let badge of msg['badges']) {
+      for (let badge of msg.badges) {
         let msg_badge = new Image();
-        msg_badge.classList.add('badge');
+        msg_badge.classList.add("badge");
         msg_badge.scales = badge;
         pickImageScale(msg_badge);
         msg_main.appendChild(msg_badge);
@@ -142,8 +142,25 @@ function parseNewMessages() {
       msg_user.style.color = msg.user_color;
       msg_user.appendChild(document.createTextNode(msg.user));
       msg_main.appendChild(msg_user);
-      // Message text
-      msg_main.appendChild(document.createTextNode(": " + msg.message));
+      msg_main.appendChild(document.createTextNode(": "));
+      // Message text and emotes
+      console.log(msg.emotes)
+      // Handle each text or emote segment
+      let prev_end = 0
+      for (const emote of msg.emotes) {
+        // Text before this emote
+        msg_main.appendChild(document.createTextNode(msg.message.substring(prev_end, emote.start)));
+        // Emote
+        let msg_emote = new Image();
+        msg_emote.classList.add("emote");
+        msg_emote.alt = msg.message.substring(emote.start, emote.end);
+        msg_emote.scales = emote.scales;
+        pickImageScale(msg_emote);
+        msg_main.appendChild(msg_emote);
+        prev_end = emote.end;
+      }
+      // Text after last emote
+      msg_main.appendChild(document.createTextNode(msg.message.substring(prev_end)));
       // Put message into main container
       chat_container.prepend(msg_main);
       // Animate
