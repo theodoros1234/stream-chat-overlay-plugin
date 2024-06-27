@@ -144,12 +144,10 @@ function parseNewMessages() {
       msg_main.appendChild(msg_user);
       msg_main.appendChild(document.createTextNode(": "));
       // Message text and emotes
-      console.log(msg.emotes)
       // Handle each text or emote segment
       let prev_end = 0;
       // Workaround for substring's inability to handle emojis correctly
       const message_separated_correctly = Array.from(msg.message);
-      console.log(message_separated_correctly);
       for (const emote of msg.emotes) {
         // Text before this emote
         let actual_char_count = Array.from
