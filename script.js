@@ -146,21 +146,25 @@ function parseNewMessages() {
       // Message text and emotes
       console.log(msg.emotes)
       // Handle each text or emote segment
-      let prev_end = 0
+      let prev_end = 0;
+      // Workaround for substring's inability to handle emojis correctly
+      const message_separated_correctly = Array.from(msg.message);
+      console.log(message_separated_correctly);
       for (const emote of msg.emotes) {
         // Text before this emote
-        msg_main.appendChild(document.createTextNode(msg.message.substring(prev_end, emote.start)));
+        let actual_char_count = Array.from
+        msg_main.appendChild(document.createTextNode(message_separated_correctly.slice(prev_end, emote.start).join('')));
         // Emote
         let msg_emote = new Image();
         msg_emote.classList.add("emote");
-        msg_emote.alt = msg.message.substring(emote.start, emote.end);
+        msg_emote.alt = message_separated_correctly.slice(emote.start, emote.end).join('');
         msg_emote.scales = emote.scales;
         pickImageScale(msg_emote);
         msg_main.appendChild(msg_emote);
         prev_end = emote.end;
       }
       // Text after last emote
-      msg_main.appendChild(document.createTextNode(msg.message.substring(prev_end)));
+      msg_main.appendChild(document.createTextNode(message_separated_correctly.slice(prev_end).join('')));
       // Put message into main container
       chat_container.prepend(msg_main);
       // Animate
