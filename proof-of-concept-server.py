@@ -633,13 +633,16 @@ def twitchIRCMessageSource():
                 'emotes': []
               }
 
+              emote_offset = 0
               # Handle replies
               if 'reply-parent-display-name' in message.tags and 'reply-parent-msg-body' in message.tags:
                 # Message is a reply
                 needed_msg_info['replying_to_user'] = message.tags['reply-parent-display-name']
                 needed_msg_info['replying_to_message'] = message.tags['reply-parent-msg-body']
                 # Cut out @user-being-replied-to from message
-                needed_msg_info['message'] = message.params[message.params.find(' ')+1:]
+                reply_tag_end = message.params.find(' ') + 1
+                emote_offset += reply_tag_end
+                needed_msg_info['message'] = message.params[reply_tag_end:]
               else:
                 # Normal message (not reply)
                 needed_msg_info['message'] = message.params
@@ -666,8 +669,8 @@ def twitchIRCMessageSource():
                     # Handle each instance of that emote
                     emote_instance_split = emote_instance.split('-')
                     emote = {}
-                    emote['start'] = int(emote_instance_split[0])
-                    emote['end'] = int(emote_instance_split[1]) + 1
+                    emote['start'] = int(emote_instance_split[0]) - emote_offset
+                    emote['end'] = int(emote_instance_split[1]) + 1 - emote_offset
                     emote['scales'] = twitchGetEmoteInfo(emote_info_split[0])
                     needed_msg_info['emotes'].append(emote)
                 # Sort by position in message
