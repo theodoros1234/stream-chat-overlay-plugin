@@ -529,7 +529,78 @@ def twitchGetChatBadges():
       badge_version[2] = badge_version_info['image_url_2x']
       badge_version[4] = badge_version_info['image_url_4x']
       badges[badge_info['set_id']][badge_version_info['id']] = badge_version
+
+  print("[Twitch API] Received chat badges")
   return badges
+
+
+# Gets BetterTTV global emotes
+def bttvGetGlobalEmotes():
+  r = requests.get("https://api.betterttv.net/3/cached/emotes/global")
+  if r.status_code != 200:
+    print(f"[BetterTTV] Failed to get global emotes. Server responded with {str(r.status_code)}")
+  try:
+    emotes = {}
+    for emote in r.json():
+      emotes[emote['code']] = emote['id']
+    print("[BetterTTV] Received global emotes")
+    return emotes
+  except requests.exceptions.JSONDecodeError:
+    print("[BetterTTV] Failed to get global emotes: JSON decode error")
+  return {}
+
+
+# Gets BetterTTV channel emotes
+def bttvGetChannelEmotes():
+  global user_id
+  r = requests.get(f"https://api.betterttv.net/3/cached/users/twitch/{user_id}")
+  if r.status_code != 200:
+    print(f"[BetterTTV] Failed to get channel emotes. Server responded with {str(r.status_code)}")
+  try:
+    emotes = {}
+    for emote in r.json()['sharedEmotes']:
+      emotes[emote['code']] = emote['id']
+    print("[BetterTTV] Received channel emotes")
+    return emotes
+  except requests.exceptions.JSONDecodeError:
+    print("[BetterTTV] Failed to get channel emotes: JSON decode error")
+  except KeyError:
+    print("[BetterTTV] Failed to get channel emotes: missing values from server response")
+  except TypeError:
+    print("[BetterTTV] Failed to get channel emotes: missing values from server response")
+  return {}
+
+
+# Gets URLs of a BetterTTV emote in different sizes
+def bttvGetEmoteInfo(emote_id):
+  emote = {}
+  scales = [(1, '1x'), (2, '2x'), (4, '3x')]
+  # Create URL for each emote scale from template
+  for scale in scales:
+    emote[scale[0]] = f"https://cdn.betterttv.net/emote/{emote_id}/{scale[1]}"
+  return emote
+
+
+# Scans message for BTTV emotes
+def bttvFindEmotes(msg, global_emotes, channel_emotes):
+  emotes = []
+  pos = 0
+  for part in msg.split(' '):
+    eid = None
+    if part in channel_emotes:
+      eid = channel_emotes[part]
+    elif part in global_emotes:
+      eid = global_emotes[part]
+
+    if eid != None:
+      emotes.append({
+        'start': pos,
+        'end': pos + len(part),
+        'scales': bttvGetEmoteInfo(eid)
+      })
+
+    pos += len(part) + 1
+  return emotes
 
 
 # Gets URL of Twitch emote
@@ -560,6 +631,9 @@ def twitchIRCMessageSource():
   badges = twitchGetChatBadges()
   if badges == None:
     return 3
+  # Get BTTV emotes
+  bttv_global = bttvGetGlobalEmotes()
+  bttv_channel = bttvGetChannelEmotes()
   # Create SSL/TLS context
   ssl_context = ssl.create_default_context()
   # Connect to server
@@ -660,6 +734,7 @@ def twitchIRCMessageSource():
               for_local_chat_queue.append(needed_msg_info)
 
               # Handle emotes
+              existing_emote_positions = {}
               if 'emotes' in message.tags and message.tags['emotes'] != "":
                 # Go through all emotes in message
                 for emote_info in message.tags['emotes'].split('/'):
@@ -673,10 +748,16 @@ def twitchIRCMessageSource():
                     emote['end'] = int(emote_instance_split[1]) + 1 - emote_offset
                     emote['scales'] = twitchGetEmoteInfo(emote_info_split[0])
                     needed_msg_info['emotes'].append(emote)
-                # Sort by position in message
-                def sortHelper(item):
-                  return item['start']
-                needed_msg_info['emotes'].sort(key=sortHelper)
+                    existing_emote_positions[emote['start']] = True
+              # Find BTTV emotes
+              for emote in bttvFindEmotes(needed_msg_info['message'], bttv_global, bttv_channel):
+                if not emote['start'] in existing_emote_positions:
+                  existing_emote_positions[emote['start']] = True
+                  needed_msg_info['emotes'].append(emote)
+              # Sort by position in message
+              def sortHelper(item):
+                return item['start']
+              needed_msg_info['emotes'].sort(key=sortHelper)
 
 
             elif cmd == "421":
