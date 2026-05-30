@@ -1,6 +1,10 @@
-const MESSAGE_TIMEOUT = 10000;
-const MESSAGE_REMOVE_ANIMATION_DURATION = 1000;
-const MESSAGE_COUNT_MAX = 35;
+const MESSAGE_TIMEOUT_DEFAULT = 10000;
+const MESSAGE_REMOVE_ANIMATION_DURATION_DEFAULT = 1000;
+const MESSAGE_COUNT_MAX_DEFAULT = 35;
+
+var message_timeout = MESSAGE_TIMEOUT_DEFAULT;
+var message_remove_animation_duration = MESSAGE_REMOVE_ANIMATION_DURATION_DEFAULT;
+var message_count_max = MESSAGE_COUNT_MAX_DEFAULT;
 
 var img_scale = 1;
 var ui_scale = 1;
@@ -38,14 +42,34 @@ function resize() {
 
 // URL parameters changed
 function urlParamsChange() {
+  // set defaults
+  message_timeout = MESSAGE_TIMEOUT_DEFAULT;
+  message_remove_animation_duration = MESSAGE_REMOVE_ANIMATION_DURATION_DEFAULT;
+  message_count_max = MESSAGE_COUNT_MAX_DEFAULT;
+
+  // get all params, which will override the defaults
   for (const [key, value] of new URLSearchParams(window.location.hash.substring(1))) {
-    if (key == "scale") {
-      new_ui_scale = parseFloat(value);
-      if (new_ui_scale != ui_scale) {
-        ui_scale = new_ui_scale;
-        css_root.style.setProperty('--ui-scale', ui_scale);
-        resize();
-      }
+    switch (key) {
+      case "scale":
+        let new_ui_scale = parseFloat(value);
+        if (new_ui_scale != ui_scale) {
+          ui_scale = new_ui_scale;
+          css_root.style.setProperty('--ui-scale', ui_scale);
+          resize();
+        }
+        break;
+
+      case "message_timeout":
+        message_timeout = parseInt(value);
+        break;
+
+      case "message_remove_animation_duration":
+        message_remove_animation_duration = parseInt(value);
+        break;
+
+      case "message_count_max":
+        message_count_max = parseInt(value);
+        break;
     }
   }
 }
@@ -111,7 +135,7 @@ function parseNewMessages() {
       // console.log(msg);
 
       // Remove oldest messages if we've reached max message limit
-      while (chat_container.children.length >= MESSAGE_COUNT_MAX) {
+      while (chat_container.children.length >= message_count_max) {
         oldest_message = chat_container.lastElementChild;
         clearTimeout(oldest_message.removal_timeout);
         oldest_message.remove();
@@ -169,7 +193,7 @@ function parseNewMessages() {
       msg_main.style.setProperty("--message-height", msg_main.clientHeight + "px");
       msg_main.classList.add("message-add");
       // Start timeout for removal of this message
-      msg_main.removal_timeout = setTimeout(() => removeMessage(msg_main), MESSAGE_TIMEOUT);
+      msg_main.removal_timeout = setTimeout(() => removeMessage(msg_main), message_timeout);
 
       // Remember the ID of this message, so we don't get it again
       last_message_id = msg.mid;
@@ -186,5 +210,5 @@ function parseNewMessages() {
 function removeMessage(msg) {
   msg.classList.remove("message-add");
   msg.classList.add("message-remove");
-  setTimeout(() => msg.remove(), MESSAGE_REMOVE_ANIMATION_DURATION);
+  setTimeout(() => msg.remove(), message_remove_animation_duration);
 }
