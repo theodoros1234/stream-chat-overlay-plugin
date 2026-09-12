@@ -52,6 +52,10 @@ body {
   object-fit: contain;
 }
 
+.slash-me {
+  font-style: italic;
+}
+
 .replying-to {
   font-size: calc(13px * var(--ui-scale));
   color: #AAA;

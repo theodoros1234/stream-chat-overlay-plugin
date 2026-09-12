@@ -4,6 +4,8 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from threading import Thread, Condition
 from queue import Queue
 
+SLASH_ME_PREFIX = "\001ACTION "
+
 SESSION_ID = str(time.time_ns())
 LOCAL_PORT = None
 HTTP_REQUEST_TIMEOUT = None
@@ -704,8 +706,14 @@ def twitchIRCMessageSource():
                 'user': message.tags['display-name'],
                 'user_color': message.tags['color'],
                 'badges': [],
-                'emotes': []
+                'emotes': [],
+                'slash_me': False
               }
+
+              # Handle /me messages
+              if message.params.startswith(SLASH_ME_PREFIX):
+                needed_msg_info['slash_me'] = True
+                message.params = message.params[len(SLASH_ME_PREFIX):]
 
               emote_offset = 0
               # Handle replies

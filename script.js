@@ -145,6 +145,11 @@ function parseNewMessages() {
       // Main div
       let msg_main = document.createElement("div");
       msg_main.classList.add("message");
+
+      // /me message
+      if (msg.slash_me)
+        msg_main.classList.add("slash-me");
+
       // Replying to another message
       if (msg.replying_to_user != undefined && msg.replying_to_message !== undefined) {
         let msg_replying_to = document.createElement("div");
@@ -152,6 +157,7 @@ function parseNewMessages() {
         msg_replying_to.textContent = "Replying to @" + msg.replying_to_user + ": " + msg.replying_to_message;
         msg_main.appendChild(msg_replying_to)
       }
+
       // Badges
       for (let badge of msg.badges) {
         let msg_badge = new Image();
@@ -160,13 +166,15 @@ function parseNewMessages() {
         pickImageScale(msg_badge);
         msg_main.appendChild(msg_badge);
       }
+
       // Chatter name
       let msg_user = document.createElement("span");
       msg_user.classList.add("chatter-name");
       msg_user.style.color = msg.user_color;
       msg_user.appendChild(document.createTextNode(msg.user));
       msg_main.appendChild(msg_user);
-      msg_main.appendChild(document.createTextNode(": "));
+      msg_main.appendChild(document.createTextNode(msg.slash_me ? " " : ": "));
+
       // Message text and emotes
       // Handle each text or emote segment
       let prev_end = 0;
@@ -187,11 +195,14 @@ function parseNewMessages() {
       }
       // Text after last emote
       msg_main.appendChild(document.createTextNode(message_separated_correctly.slice(prev_end).join('')));
+
       // Put message into main container
       chat_container.prepend(msg_main);
+
       // Animate
       msg_main.style.setProperty("--message-height", msg_main.clientHeight + "px");
       msg_main.classList.add("message-add");
+
       // Start timeout for removal of this message
       msg_main.removal_timeout = setTimeout(() => removeMessage(msg_main), message_timeout);
 
