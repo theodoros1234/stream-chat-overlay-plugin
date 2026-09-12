@@ -707,7 +707,8 @@ def twitchIRCMessageSource():
                 'user_color': message.tags['color'],
                 'badges': [],
                 'emotes': [],
-                'slash_me': False
+                'slash_me': False,
+                'gif': None
               }
 
               # Handle /me messages
@@ -741,9 +742,17 @@ def twitchIRCMessageSource():
               # Append message to local chat queue
               for_local_chat_queue.append(needed_msg_info)
 
-              # Handle emotes
+              # Handle GIFs
+              if 'gifs' in message.tags and message.tags['gifs'] != "":
+                print("GIFs:", message.tags['gifs'])
+                # NOTE: theoretically, the API can send multiple gifs, but only the first will be considered.
+                gif_info = message.tags['gifs'].split('|')
+                if (len(gif_info) >= 3):
+                  needed_msg_info['gif'] = gif_info[2]
+
+              # Handle emotes (ignored if GIFs are present)
               existing_emote_positions = {}
-              if 'emotes' in message.tags and message.tags['emotes'] != "":
+              if needed_msg_info['gif'] == None and 'emotes' in message.tags and message.tags['emotes'] != "":
                 # Go through all emotes in message
                 for emote_info in message.tags['emotes'].split('/'):
                   # Parse info from single emote

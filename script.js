@@ -132,7 +132,7 @@ function parseNewMessages() {
     // Go through messages
     for (let msg of data.messages) {
       // Print message to console
-      // console.log(msg);
+      console.log(msg);
 
       // Remove oldest messages if we've reached max message limit
       while (chat_container.children.length >= message_count_max) {
@@ -175,26 +175,37 @@ function parseNewMessages() {
       msg_main.appendChild(msg_user);
       msg_main.appendChild(document.createTextNode(msg.slash_me ? " " : ": "));
 
-      // Message text and emotes
-      // Handle each text or emote segment
-      let prev_end = 0;
-      // Workaround for substring's inability to handle emojis correctly
-      const message_separated_correctly = Array.from(msg.message);
-      for (const emote of msg.emotes) {
-        // Text before this emote
-        let actual_char_count = Array.from
-        msg_main.appendChild(document.createTextNode(message_separated_correctly.slice(prev_end, emote.start).join('')));
-        // Emote
-        let msg_emote = new Image();
-        msg_emote.classList.add("emote");
-        msg_emote.alt = message_separated_correctly.slice(emote.start, emote.end).join('');
-        msg_emote.scales = emote.scales;
-        pickImageScale(msg_emote);
-        msg_main.appendChild(msg_emote);
-        prev_end = emote.end;
+      if (msg.gif === null) {
+        console.log("gif is null: " + msg.gif);
+        // Message text and emotes
+        // Handle each text or emote segment
+        let prev_end = 0;
+        // Workaround for substring's inability to handle emojis correctly
+        const message_separated_correctly = Array.from(msg.message);
+        for (const emote of msg.emotes) {
+          // Text before this emote
+          let actual_char_count = Array.from
+          msg_main.appendChild(document.createTextNode(message_separated_correctly.slice(prev_end, emote.start).join('')));
+          // Emote
+          let msg_emote = new Image();
+          msg_emote.classList.add("emote");
+          msg_emote.alt = message_separated_correctly.slice(emote.start, emote.end).join('');
+          msg_emote.scales = emote.scales;
+          pickImageScale(msg_emote);
+          msg_main.appendChild(msg_emote);
+          prev_end = emote.end;
+        }
+        // Text after last emote
+        msg_main.appendChild(document.createTextNode(message_separated_correctly.slice(prev_end).join('')));
+      } else {
+        console.log("gif is NOT null: " + msg.gif);
+        // GIF
+        const msg_gif = new Image();
+        msg_gif.classList.add("gif");
+        msg_gif.alt = msg.message;
+        msg_gif.src = msg.gif;
+        msg_main.appendChild(msg_gif);
       }
-      // Text after last emote
-      msg_main.appendChild(document.createTextNode(message_separated_correctly.slice(prev_end).join('')));
 
       // Put message into main container
       chat_container.prepend(msg_main);
