@@ -190,6 +190,7 @@ function parseNewMessages() {
           let msg_emote = new Image();
           msg_emote.classList.add("emote");
           msg_emote.alt = message_separated_correctly.slice(emote.start, emote.end).join('');
+          msg_emote.title = msg_emote.alt;
           msg_emote.scales = emote.scales;
           pickImageScale(msg_emote);
           msg_main.appendChild(msg_emote);
@@ -203,6 +204,7 @@ function parseNewMessages() {
         const msg_gif = new Image();
         msg_gif.classList.add("gif");
         msg_gif.alt = msg.message;
+        msg_gif.title = msg.message;
         msg_gif.src = msg.gif;
         msg_main.appendChild(msg_gif);
       }
