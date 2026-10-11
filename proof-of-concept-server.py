@@ -15,7 +15,7 @@ IRC_SERVER = None
 IRC_PORT = None
 CHANNEL = None
 OAUTH_TOKEN = None
-_7TV_GLOBAL_EMOTE_SET = "01HKQT8EWR000ESSWF3625XCS4"
+_7TV_GLOBAL_EMOTE_SET = "global"
 
 http_server = None
 chat_queue = None
