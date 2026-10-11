@@ -554,8 +554,8 @@ def bttvGetGlobalEmotes():
 
 # Gets BetterTTV channel emotes
 def bttvGetChannelEmotes():
-  global user_id
-  r = requests.get(f"https://api.betterttv.net/3/cached/users/twitch/{user_id}")
+  global channel_id
+  r = requests.get(f"https://api.betterttv.net/3/cached/users/twitch/{channel_id}")
   if r.status_code != 200:
     print(f"[BetterTTV] Failed to get channel emotes. Server responded with {str(r.status_code)}")
   try:
