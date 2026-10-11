@@ -30,6 +30,7 @@ body {
   font-size: calc(17px * var(--ui-scale));
   line-height: calc(28px * var(--ui-scale));
   overflow-y: clip;
+  overflow-wrap: anywhere;
   flex: none;
 }
 
