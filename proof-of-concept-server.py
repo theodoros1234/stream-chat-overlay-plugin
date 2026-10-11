@@ -15,6 +15,7 @@ IRC_SERVER = None
 IRC_PORT = None
 CHANNEL = None
 OAUTH_TOKEN = None
+_7TV_GLOBAL_EMOTE_SET = "01HKQT8EWR000ESSWF3625XCS4"
 
 http_server = None
 chat_queue = None
@@ -583,22 +584,90 @@ def bttvGetEmoteInfo(emote_id):
   return emote
 
 
-# Scans message for BTTV emotes
-def bttvFindEmotes(msg, global_emotes, channel_emotes):
+# Gets BetterTTV global emotes
+def _7tvGetGlobalEmotes():
+  r = requests.get(f"https://7tv.io/v3/emote-sets/{_7TV_GLOBAL_EMOTE_SET}")
+  if r.status_code != 200:
+    print(f"[7TV] Failed to get global emotes. Server responded with {str(r.status_code)}")
+  try:
+    emotes = {}
+    for emote in r.json()['emotes']:
+      emotes[emote['name']] = emote['id']
+    print("[7TV] Received global emotes")
+    return emotes
+  except requests.exceptions.JSONDecodeError:
+    print("[7TV] Failed to get global emotes: JSON decode error")
+  except KeyError:
+    print("[7TV] Failed to get global emotes: missing values from server response")
+  except TypeError:
+    print("[7TV] Failed to get global emotes: missing values from server response")
+  return {}
+
+
+# Gets 7TV channel emotes
+def _7tvGetChannelEmotes():
+  global channel_id
+  r = requests.get(f"https://7tv.io/v3/users/twitch/{channel_id}")
+  if r.status_code != 200:
+    print(f"[7TV] Failed to get channel emotes. Server responded with {str(r.status_code)}")
+  try:
+    r_json = r.json()
+    if r_json['emote_set'] == None:
+      print("[7TV] No channel emotes")
+      return {}
+    emotes = {}
+    for emote in r_json['emote_set']['emotes']:
+      emotes[emote['name']] = emote['id']
+    print("[7TV] Received channel emotes")
+    return emotes
+  except requests.exceptions.JSONDecodeError:
+    print("[7TV] Failed to get channel emotes: JSON decode error")
+  except KeyError:
+    print("[7TV] Failed to get channel emotes: missing values from server response")
+  except TypeError:
+    print("[7TV] Failed to get channel emotes: missing values from server response")
+  return {}
+
+
+# Gets URLs of a 7TV emote in different sizes
+def _7tvGetEmoteInfo(emote_id):
+  # NOTE: The 7TV API returns the URLs of each emote size for all available formats.
+  #       When redoing this properly, consider using those returned URLs.
+  #       Also, layering emotes don't work properly now.
+  emote = {}
+  scales = [(1, '1x'), (2, '2x'), (3, '3x'), (4, '4x')]
+  # Create URL for each emote scale from template
+  for scale in scales:
+    emote[scale[0]] = f"https://cdn.7tv.app/emote/{emote_id}/{scale[1]}.avif"
+  return emote
+
+
+# Scans message for 3rd party extension emotes
+def find3rdPartyEmotes(msg, emote_sets):
   emotes = []
   pos = 0
   for part in msg.split(' '):
     eid = None
-    if part in channel_emotes:
-      eid = channel_emotes[part]
-    elif part in global_emotes:
-      eid = global_emotes[part]
+    platform = None
+    for emote_set in emote_sets:
+      if part in emote_set[1]:
+        eid = emote_set[1][part]
+        platform = emote_set[0]
+        break
 
     if eid != None:
+      match platform:
+        case 'bttv':
+          scales = bttvGetEmoteInfo(eid)
+        case '7tv':
+          scales = _7tvGetEmoteInfo(eid)
+        case _:
+          raise RuntimeError("Invalid 3rd party emote platform " + repr(platform))
+
       emotes.append({
         'start': pos,
         'end': pos + len(part),
-        'scales': bttvGetEmoteInfo(eid)
+        'scales': scales
       })
 
     pos += len(part) + 1
@@ -633,9 +702,17 @@ def twitchIRCMessageSource():
   badges = twitchGetChatBadges()
   if badges == None:
     return 3
-  # Get BTTV emotes
+  # Get 3rd party extension emotes
   bttv_global = bttvGetGlobalEmotes()
   bttv_channel = bttvGetChannelEmotes()
+  _7tv_global = _7tvGetGlobalEmotes()
+  _7tv_channel = _7tvGetChannelEmotes()
+  emotes_3rd_party = [
+    ("7tv", _7tv_channel),
+    ("bttv", bttv_channel),
+    ("7tv", _7tv_global),
+    ("bttv", bttv_global)
+  ]
   # Create SSL/TLS context
   ssl_context = ssl.create_default_context()
   # Connect to server
@@ -766,8 +843,8 @@ def twitchIRCMessageSource():
                     emote['scales'] = twitchGetEmoteInfo(emote_info_split[0])
                     needed_msg_info['emotes'].append(emote)
                     existing_emote_positions[emote['start']] = True
-              # Find BTTV emotes
-              for emote in bttvFindEmotes(needed_msg_info['message'], bttv_global, bttv_channel):
+              # Find 3rd party emotes
+              for emote in find3rdPartyEmotes(needed_msg_info['message'], emotes_3rd_party):
                 if not emote['start'] in existing_emote_positions:
                   existing_emote_positions[emote['start']] = True
                   needed_msg_info['emotes'].append(emote)
